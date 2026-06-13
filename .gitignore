@@ -9,3 +9,5 @@ dist/
 !.env.example
 
 메트로놈_*.md
+
+.vercel
