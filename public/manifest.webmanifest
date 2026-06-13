@@ -1,0 +1,19 @@
+{
+  "name": "Pulse Metronome",
+  "short_name": "Pulse",
+  "description": "A mobile-first metronome that opens fast, works offline, and keeps tempo visible.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#101113",
+  "background_color": "#101113",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
