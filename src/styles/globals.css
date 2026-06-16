@@ -92,12 +92,417 @@ button,
   animation: screen-flash 160ms ease-out;
 }
 
+.mechanical-metronome {
+  --meter-height: clamp(330px, 54dvh, 570px);
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: min(var(--meter-height), 100%);
+}
+
+.mechanical-metronome__cabinet {
+  position: relative;
+  width: min(100%, calc(var(--meter-height) * 0.66));
+  height: var(--meter-height);
+  filter: drop-shadow(0 28px 34px rgba(0, 0, 0, 0.32));
+}
+
+.mechanical-metronome__top,
+.mechanical-metronome__base {
+  position: absolute;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.18), transparent 14%, rgba(78, 36, 8, 0.18) 48%, transparent 78%),
+    repeating-linear-gradient(92deg, rgba(93, 48, 9, 0.42) 0 2px, transparent 2px 13px),
+    linear-gradient(90deg, #9d641b, #d19832 16%, #ae6f20 37%, #c98824 64%, #8f5717);
+}
+
+.mechanical-metronome__top::after,
+.mechanical-metronome__base::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 16% 46%, rgba(66, 35, 8, 0.55) 0 7%, transparent 8%),
+    radial-gradient(ellipse at 58% 58%, rgba(73, 39, 9, 0.48) 0 5%, transparent 6%),
+    repeating-linear-gradient(100deg, transparent 0 18px, rgba(69, 35, 5, 0.22) 18px 21px, transparent 21px 38px);
+  mix-blend-mode: multiply;
+  opacity: 0.75;
+}
+
+.mechanical-metronome__top {
+  top: 0;
+  left: 27%;
+  width: 46%;
+  height: 11%;
+  clip-path: polygon(50% 0, 100% 56%, 94% 100%, 6% 100%, 0 56%);
+  border-radius: 2px 2px 8px 8px;
+  box-shadow:
+    inset 0 -7px 10px rgba(58, 30, 5, 0.48),
+    inset 0 2px 3px rgba(255, 238, 176, 0.38);
+  z-index: 4;
+}
+
+.mechanical-metronome__case {
+  position: absolute;
+  top: 6%;
+  left: 8.5%;
+  right: 8.5%;
+  bottom: 23%;
+  clip-path: polygon(26% 0, 74% 0, 100% 100%, 0 100%);
+  border-radius: 10px 10px 12px 12px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.14), transparent 10%, rgba(0, 0, 0, 0.52) 19%, transparent 27%, transparent 73%, rgba(0, 0, 0, 0.62) 82%, rgba(255, 255, 255, 0.14)),
+    linear-gradient(180deg, #171717, #222226 54%, #101113);
+  box-shadow:
+    inset 16px 0 18px rgba(255, 255, 255, 0.08),
+    inset -16px 0 18px rgba(0, 0, 0, 0.54),
+    inset 0 -11px 12px rgba(0, 0, 0, 0.7);
+  z-index: 2;
+}
+
+.mechanical-metronome__inner-face {
+  position: absolute;
+  top: 10%;
+  left: 17%;
+  right: 17%;
+  bottom: 29%;
+  clip-path: polygon(25% 0, 75% 0, 98% 100%, 2% 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 28%),
+    linear-gradient(180deg, #303034, #22222a 70%, #1a1b23);
+  box-shadow:
+    inset 0 0 0 8px rgba(0, 0, 0, 0.28),
+    inset 0 18px 20px rgba(255, 255, 255, 0.04);
+  z-index: 3;
+}
+
+.mechanical-metronome__tempo-card {
+  position: absolute;
+  top: 14.5%;
+  bottom: 27.5%;
+  left: 50%;
+  width: clamp(66px, 21%, 92px);
+  transform: translateX(-50%);
+  border: 1px solid rgba(35, 35, 35, 0.55);
+  border-radius: 2px;
+  background:
+    linear-gradient(90deg, #f0f0ee 0 47%, #777 47% 49%, #fafafa 49% 51%, #777 51% 53%, #e7e7e5 53%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.8), transparent);
+  box-shadow:
+    0 2px 2px rgba(0, 0, 0, 0.45),
+    inset 0 0 12px rgba(0, 0, 0, 0.08);
+  z-index: 5;
+}
+
+.mechanical-metronome__tempo-spine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, #555, #1f1f1f, #777);
+}
+
+.mechanical-metronome__tempo-guide {
+  position: absolute;
+  top: var(--bpm-y);
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(11, 12, 13, 0.72);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+
+.mechanical-metronome__tempo-mark {
+  position: absolute;
+  top: var(--mark-y);
+  width: 42%;
+  min-height: 10px;
+  transform: translateY(-50%);
+  border-top: 1px solid rgba(49, 49, 49, 0.55);
+  color: #4a4d4f;
+  font-size: clamp(8px, 1.45dvh, 13px);
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  background: transparent;
+}
+
+.mechanical-metronome__tempo-mark--left {
+  left: 0;
+}
+
+.mechanical-metronome__tempo-mark--right {
+  right: 0;
+}
+
+.mechanical-metronome__pendulum {
+  position: absolute;
+  top: 10.5%;
+  bottom: 27%;
+  left: 50%;
+  width: 38%;
+  transform: translateX(-50%) rotate(var(--swing-angle));
+  transform-origin: 50% 100%;
+  transition: transform 160ms cubic-bezier(0.28, 0.72, 0.42, 1);
+  z-index: 7;
+}
+
+.mechanical-metronome__rod {
+  position: absolute;
+  top: -4%;
+  bottom: -5%;
+  left: 50%;
+  width: clamp(8px, 3.1%, 14px);
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.92), rgba(177, 180, 178, 0.94) 30%, #f8faf8 48%, #8c918e 78%, rgba(255, 255, 255, 0.72)),
+    #d9dcda;
+  box-shadow:
+    0 0 5px rgba(255, 255, 255, 0.42),
+    0 14px 18px rgba(0, 0, 0, 0.3);
+}
+
+.mechanical-metronome__weight {
+  position: absolute;
+  top: clamp(7%, var(--bpm-y), 88%);
+  left: 50%;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1px;
+  place-items: center;
+  width: clamp(52px, 34%, 78px);
+  min-height: clamp(42px, 8dvh, 58px);
+  padding: 4px 5px;
+  transform: translate(-50%, -50%) rotate(var(--counter-swing-angle));
+  border-radius: 5px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.82), transparent 32%),
+    linear-gradient(90deg, #8b8f8e, #f7f8f6 28%, #b5b8b6 52%, #6b6f70);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.58),
+    inset 0 -12px 16px rgba(0, 0, 0, 0.16),
+    0 8px 14px rgba(0, 0, 0, 0.35);
+}
+
+.mechanical-metronome__weight::before,
+.mechanical-metronome__weight::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 38%;
+  height: 7px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f9faf9, #8f9392);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+
+.mechanical-metronome__weight::before {
+  left: -30%;
+}
+
+.mechanical-metronome__weight::after {
+  right: -30%;
+}
+
+.mechanical-metronome__bpm-input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #161616;
+  font-size: clamp(1rem, 3.5dvh, 1.58rem);
+  font-weight: 900;
+  line-height: 1.05;
+  text-align: center;
+  outline: none;
+}
+
+.mechanical-metronome__weight span {
+  color: #242629;
+  font-size: clamp(0.46rem, 1.25dvh, 0.62rem);
+  font-weight: 900;
+  line-height: 1;
+}
+
+.mechanical-metronome__base {
+  left: 0;
+  right: 0;
+  bottom: 5.5%;
+  height: 28%;
+  clip-path: polygon(11% 0, 89% 0, 100% 97%, 2% 97%);
+  border-radius: 8px 8px 6px 6px;
+  box-shadow:
+    inset 0 9px 12px rgba(255, 227, 154, 0.28),
+    inset 0 -12px 20px rgba(68, 35, 7, 0.38),
+    0 14px 16px rgba(0, 0, 0, 0.18);
+  z-index: 8;
+}
+
+.mechanical-metronome__tempo-meta {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  padding-top: clamp(12px, 2.5dvh, 22px);
+  color: rgba(20, 13, 6, 0.88);
+  font-size: clamp(0.72rem, 1.75dvh, 0.94rem);
+  font-weight: 900;
+}
+
+.mechanical-metronome__tempo-meta span {
+  border-radius: 999px;
+  background: rgba(255, 234, 178, 0.28);
+  padding: 3px 8px;
+}
+
+.mechanical-metronome__beat-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 84%;
+  margin: clamp(8px, 2.2dvh, 16px) auto 0;
+}
+
+.mechanical-metronome__beat-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mechanical-metronome__beat-button {
+  display: grid;
+  place-items: center;
+  min-width: 32px;
+  min-height: 32px;
+  border: 1px solid rgba(38, 24, 7, 0.45);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.44), rgba(54, 35, 13, 0.2));
+  color: rgba(23, 15, 6, 0.88);
+  font-size: 10px;
+  font-weight: 900;
+  box-shadow: inset 0 1px 2px rgba(255, 244, 209, 0.45);
+}
+
+.mechanical-metronome__beat-button[data-active="true"] {
+  background: linear-gradient(180deg, #f7f7f3, #bfc4c2);
+  color: #111314;
+  box-shadow:
+    0 0 0 3px rgba(250, 250, 246, 0.18),
+    0 4px 10px rgba(0, 0, 0, 0.28);
+}
+
+.mechanical-metronome__beat-button[data-accent="strong"] {
+  min-width: 38px;
+  min-height: 38px;
+}
+
+.mechanical-metronome__beat-button[data-accent="soft"] {
+  min-width: 28px;
+  min-height: 28px;
+}
+
+.mechanical-metronome__beat-button[data-accent="mute"] {
+  border-style: dashed;
+  opacity: 0.62;
+}
+
+.mechanical-metronome__beat-divider {
+  color: rgba(42, 26, 7, 0.52);
+  font-weight: 900;
+}
+
+.mechanical-metronome__winder {
+  position: absolute;
+  right: -11%;
+  bottom: 20.5%;
+  width: 21%;
+  height: 12%;
+  z-index: 1;
+}
+
+.mechanical-metronome__winder::before {
+  content: "";
+  position: absolute;
+  top: 39%;
+  left: 0;
+  width: 44%;
+  height: 22%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #222, #f2f2ef 38%, #727574 78%);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+
+.mechanical-metronome__winder span {
+  position: absolute;
+  right: 0;
+  top: 8%;
+  width: 68%;
+  aspect-ratio: 1;
+  border: clamp(5px, 1dvh, 8px) solid #c7cbc8;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow:
+    inset 2px 2px 4px rgba(255, 255, 255, 0.72),
+    2px 4px 7px rgba(0, 0, 0, 0.28);
+}
+
+.mechanical-metronome__feet {
+  position: absolute;
+  left: 15%;
+  right: 15%;
+  bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  z-index: 0;
+}
+
+.mechanical-metronome__feet span {
+  width: 16%;
+  height: clamp(26px, 5.4dvh, 44px);
+  border-radius: 0 0 14px 14px;
+  background: linear-gradient(180deg, #232326, #050607);
+  box-shadow: inset 8px 0 10px rgba(255, 255, 255, 0.08);
+}
+
+.landscape-metronome .mechanical-metronome {
+  --meter-height: clamp(360px, 68dvh, 620px);
+}
+
 @keyframes screen-flash {
   0% {
     opacity: 0.8;
   }
   100% {
     opacity: 0;
+  }
+}
+
+@media (max-height: 760px) {
+  .mechanical-metronome {
+    --meter-height: clamp(285px, 43dvh, 430px);
+  }
+
+  .mechanical-metronome__beat-button {
+    min-width: 28px;
+    min-height: 28px;
+  }
+
+  .mechanical-metronome__beat-button[data-accent="strong"] {
+    min-width: 34px;
+    min-height: 34px;
   }
 }
 

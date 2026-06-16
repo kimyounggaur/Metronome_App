@@ -1,9 +1,7 @@
-import { Bookmark, Menu, Music, Settings, SlidersHorizontal, Timer, X } from "lucide-react";
+import { Bookmark, Menu, Music, Pause, Play, Settings, SkipBack, SkipForward, SlidersHorizontal, Timer, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { BigDisplay } from "./components/BigDisplay";
 import { BottomSheet } from "./components/BottomSheet";
-import { BeatVisualizer } from "./components/BeatVisualizer";
-import { BpmDisplay } from "./components/BpmDisplay";
+import { MechanicalMetronome } from "./components/MechanicalMetronome";
 import { PracticeSheet } from "./components/PracticeSheet";
 import { PresetSheet } from "./components/PresetSheet";
 import { RhythmSheet } from "./components/RhythmSheet";
@@ -151,15 +149,33 @@ export default function App() {
   if (isLandscape) {
     return (
       <div className={`min-h-full ${settings.flash ? "full-flash" : ""} ${flashOn ? "flash-on" : ""}`}>
-        <BigDisplay
-          bpm={settings.bpm}
-          accents={normalizeAccents(settings.accents, settings.timeSignature.beats)}
-          event={controls.currentEvent}
-          isPlaying={controls.isPlaying}
-          onToggle={() => void controls.toggle()}
-          onPrevious={() => moveSetlist(-1)}
-          onNext={() => moveSetlist(1)}
-        />
+        <main className="app-screen grid grid-cols-[96px_1fr_96px] items-center gap-4">
+          <button className="touch-target grid h-28 place-items-center rounded-3xl surface-2" type="button" aria-label="이전 프리셋" onClick={() => moveSetlist(-1)}>
+            <SkipBack size={44} aria-hidden="true" />
+          </button>
+          <section className="landscape-metronome flex min-w-0 flex-col items-center justify-center gap-3" aria-label="가로 기계식 메트로놈">
+            <MechanicalMetronome
+              bpm={settings.bpm}
+              timeSignature={settings.timeSignature}
+              event={controls.currentEvent}
+              pulseId={controls.pulseId}
+              accents={normalizeAccents(settings.accents, settings.timeSignature.beats)}
+              onSetBpm={controls.setBpm}
+              onCycleAccent={onCycleAccent}
+            />
+            <button
+              className="grid h-20 w-20 place-items-center rounded-full bg-[color:var(--accent)] text-[color:var(--bg)] shadow-glow"
+              type="button"
+              aria-label={controls.isPlaying ? "정지" : "재생"}
+              onClick={() => void controls.toggle()}
+            >
+              {controls.isPlaying ? <Pause size={32} fill="currentColor" aria-hidden="true" /> : <Play size={36} fill="currentColor" aria-hidden="true" />}
+            </button>
+          </section>
+          <button className="touch-target grid h-28 place-items-center rounded-3xl surface-2" type="button" aria-label="다음 프리셋" onClick={() => moveSetlist(1)}>
+            <SkipForward size={44} aria-hidden="true" />
+          </button>
+        </main>
         <LiveRegion isPlaying={controls.isPlaying} bpm={settings.bpm} toast={toast} />
       </div>
     );
@@ -180,13 +196,14 @@ export default function App() {
           </button>
         </header>
 
-        <section className="flex min-h-0 flex-col justify-center gap-5 lg:rounded-[28px] lg:p-6 lg:surface">
-          <BpmDisplay bpm={settings.bpm} timeSignature={settings.timeSignature} onSetBpm={controls.setBpm} />
-          <BeatVisualizer
+        <section className="flex min-h-0 flex-col justify-center gap-4 lg:rounded-[28px] lg:p-6 lg:surface">
+          <MechanicalMetronome
+            bpm={settings.bpm}
+            timeSignature={settings.timeSignature}
             event={controls.currentEvent}
             pulseId={controls.pulseId}
             accents={normalizeAccents(settings.accents, settings.timeSignature.beats)}
-            timeSignature={settings.timeSignature}
+            onSetBpm={controls.setBpm}
             onCycleAccent={onCycleAccent}
           />
           <div className="flex flex-wrap justify-center gap-2">
