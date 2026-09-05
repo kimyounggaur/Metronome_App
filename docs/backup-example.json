@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 2,
+  "settings": {
+    "bpm": 120,
+    "tempoUnit": "quarter",
+    "beatGroups": [
+      4
+    ],
+    "timeSignature": {
+      "beats": 4,
+      "noteValue": 4
+    },
+    "subdivision": "none",
+    "accents": [
+      "strong",
+      "normal",
+      "normal",
+      "normal"
+    ],
+    "sound": "classic",
+    "volume": 0.82,
+    "muted": false,
+    "haptics": false,
+    "flash": false,
+    "theme": "dark",
+    "wakeLock": true,
+    "showInstallHint": true,
+    "autoLandscape": false,
+    "practice": {
+      "countInBars": 0,
+      "timerSeconds": null,
+      "speedTrainer": {
+        "enabled": false,
+        "startBpm": 80,
+        "targetBpm": 120,
+        "step": 2,
+        "everyBars": 4,
+        "onReach": "hold"
+      },
+      "gapTrainer": {
+        "enabled": false,
+        "playBars": 3,
+        "muteBars": 1,
+        "keepVisual": true
+      },
+      "randomMute": {
+        "enabled": false,
+        "probability": 0,
+        "unit": "beat"
+      }
+    }
+  },
+  "presets": [],
+  "setlists": [],
+  "navigation": {
+    "activePresetId": null,
+    "activeSetlistId": null,
+    "activeItemIndex": 0
+  }
+}
