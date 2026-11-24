@@ -1,5 +1,6 @@
 import { chromium } from '@playwright/test';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
+import { largeBackupFixture } from './refactor-fixtures.mjs';
 const duration=Number(process.argv[2]??10), port=Number(process.argv[3]??5173), name=process.argv[4]??'measurement';
 const inputBurst=process.argv.includes('--input-burst');
 const inputIntervalMs=inputBurst?0:33;
@@ -8,13 +9,30 @@ await mkdir('output/playwright',{recursive:true});
 const browser=await chromium.launch({headless:true,args:['--disable-background-timer-throttling','--disable-renderer-backgrounding']});
 const context=await browser.newContext({viewport:{width:1440,height:900}});
 const page=await context.newPage();const errors=[];page.on('pageerror',error=>errors.push(String(error)));
-await page.goto('http://127.0.0.1:'+port);
-const seed=JSON.parse(await readFile('docs/backup-example.json','utf8'));
-await page.evaluate(({duration,data})=>{data.settings.bpm=300;data.settings.subdivision='sixteenth';if(duration>=600){data.settings.practice.timerSeconds=650;data.settings.practice.speedTrainer={enabled:true,startBpm:300,targetBpm:300,step:2,everyBars:2,onReach:'hold'};}localStorage.setItem('pulse:data:v2',JSON.stringify(data));},{duration,data:seed});
-await page.reload();
+const seed=process.argv.includes('--large-library') ? largeBackupFixture() : JSON.parse(await readFile('docs/backup-example.json','utf8'));
+seed.settings.bpm = 300;
+seed.settings.subdivision = 'sixteenth';
+if (duration >= 600) {
+  seed.settings.practice.timerSeconds = 650;
+  seed.settings.practice.speedTrainer = { enabled: true, startBpm: 300, targetBpm: 300, step: 2, everyBars: 2, onReach: 'hold' };
+}
+await page.addInitScript((data) => localStorage.setItem('pulse:data:v2', JSON.stringify(data)), seed);
+await page.goto('http://127.0.0.1:' + port);
+await page.getByLabel('BPM 직접 입력').waitFor();
 await page.evaluate(()=>{
   window.__measure={nodesAdded:0,storageWrites:0,storageMs:0,longTasks:[],started:performance.now()};
-  const set=Storage.prototype.setItem;Storage.prototype.setItem=function(...args){const t=performance.now();window.__measure.storageWrites++;try{return set.apply(this,args);}finally{window.__measure.storageMs+=performance.now()-t;}};
+  const transact = IDBDatabase.prototype.transaction;
+  IDBDatabase.prototype.transaction = function (...args) {
+    const tx = Reflect.apply(transact, this, args);
+    if (this.name === 'pulse-metronome' && tx.mode === 'readwrite') {
+      const started = performance.now();
+      tx.addEventListener('complete', () => {
+        window.__measure.storageWrites++;
+        window.__measure.storageMs += performance.now() - started;
+      }, { once: true });
+    }
+    return tx;
+  };
   const visual=document.querySelector('[aria-label="박 시각화"]');new MutationObserver(records=>{window.__measure.nodesAdded+=records.reduce((n,r)=>n+r.addedNodes.length,0);}).observe(visual,{subtree:true,childList:true});
   try{new PerformanceObserver(list=>{window.__measure.longTasks.push(...list.getEntries().map(e=>({duration:e.duration,startTime:e.startTime})));}).observe({type:'longtask',buffered:true});}catch{}
 });

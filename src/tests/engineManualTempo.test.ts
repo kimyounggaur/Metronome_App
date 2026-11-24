@@ -75,4 +75,23 @@ describe("manual tempo applies to the next unreserved interval", () => {
     expect(h.context.oscillators[1].starts[0]).toBeCloseTo(0.06 + 1 / 6);
     engine.dispose();
   });
+  it("R06 canceled tempo drag resumes the running training segment at its next unreserved interval", async () => {
+    const h = engineHarness();
+    const initial = settingsForEngine(defaultSettings);
+    initial.practice.speedTrainer.enabled = true;
+    const engine = new MetronomeEngine(initial, undefined, h.dependencies);
+    await engine.start(); advance(h, .2);
+    const rollback = engine.captureTempoRollback();
+    const manual = structuredClone(initial);
+    manual.bpm = 150; manual.practice.speedTrainer.enabled = false;
+    engine.updateSettings(manual, "manual");
+    h.tick(.25);
+    engine.updateSettings(initial);
+    expect(rollback()).toBe(80);
+    advance(h, .95);
+    expect(h.context.oscillators.map(oscillator => oscillator.starts[0])).toEqual([.06, .81]);
+    expect(engine.getSnapshot().currentEvent?.bpm).toBe(80);
+    engine.dispose();
+  });
+
 });

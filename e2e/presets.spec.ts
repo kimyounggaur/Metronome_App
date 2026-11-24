@@ -1,6 +1,7 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import AxeBuilder from "@axe-core/playwright";
+import { readSavedData as readData } from "./savedData";
 import { createDefaultData, createPreset, selectSetlist } from "../src/domain/presets";
 
 function fixture() {
@@ -12,7 +13,6 @@ function fixture() {
   data.setlists = [{ id: "lesson", name: "레슨", items: ["A", "B", "C"].map((presetId, index) => ({ id: `item-${index}`, presetId })) }];
   return selectSetlist(data, "lesson");
 }
-async function readData(page: Page) { return page.evaluate(() => JSON.parse(localStorage.getItem("pulse:data:v2")!)); }
 test.beforeEach(async ({ page }) => {
   const initial = fixture();
   await page.addInitScript((data) => { if (!localStorage.getItem("pulse:data:v2")) localStorage.setItem("pulse:data:v2", JSON.stringify(data)); }, initial);
@@ -25,9 +25,9 @@ test("equal BPM songs share navigation across preset sheet and performance mode 
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "프리셋 열기", exact: true })).toHaveText("B · 3/4");
   await page.getByRole("button", { name: "공연 모드 열기" }).click();
-  await page.getByRole("button", { name: "다음 프리셋", exact: true }).click();
+  await page.getByRole("button", { name: "다음 셋리스트 항목", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1 })).toContainText("C");
-  await page.getByRole("button", { name: "이전 프리셋", exact: true }).click();
+  await page.getByRole("button", { name: "이전 셋리스트 항목", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1 })).toContainText("B");
   await page.getByRole("button", { name: "일반 화면으로" }).click();
   await page.getByRole("button", { name: "BPM 1 증가", exact: true }).click();
@@ -62,14 +62,17 @@ test("preset CRUD, search, repeated items and ordering work with named controls"
   await page.getByRole("button", { name: "셋리스트 이름 변경", exact: true }).click();
   await page.getByLabel("변경할 셋리스트 이름", { exact: true }).fill("공연 순서");
   await page.getByRole("button", { name: "이름 적용", exact: true }).click();
+  await expect.poll(async () => (await readData(page)).setlists[0].name).toBe("공연 순서");
   let data = await readData(page);
   expect(data.setlists[0].name).toBe("공연 순서"); expect(data.navigation.activeItemIndex).toBe(1);
   await page.getByRole("button", { name: "현재 프리셋 목록으로 셋리스트 만들기", exact: true }).click();
-  data = await readData(page); expect(data.setlists).toHaveLength(2);
+  await expect.poll(async () => (await readData(page)).setlists.length).toBe(2);
   await page.getByRole("button", { name: "현재 셋리스트 삭제", exact: true }).click();
-  data = await readData(page); expect(data.setlists).toHaveLength(1); expect(data.presets).toHaveLength(4);
+  await expect.poll(async () => (await readData(page)).setlists.length).toBe(1);
+  expect((await readData(page)).presets).toHaveLength(4);
   await page.getByRole("button", { name: "발라드 복사 삭제", exact: true }).click();
-  data = await readData(page); expect(data.presets).toHaveLength(3); expect(data.presets.find((p: { id: string }) => p.id === "B").name).toBe("발라드");
+  await expect.poll(async () => (await readData(page)).presets.length).toBe(3);
+  data = await readData(page); expect(data.presets.find((p: { id: string }) => p.id === "B").name).toBe("발라드");
 });
 
 test("downloaded backup restores all data in an independent browser context", async ({ page, browser }) => {
@@ -89,7 +92,7 @@ test("downloaded backup restores all data in an independent browser context", as
     await expect(restoredPage.getByRole("button", { name: "가져오기 적용", exact: true })).toBeDisabled();
     await restoredPage.getByRole("checkbox", { name: "현재 설정·프리셋·셋리스트를 백업 내용으로 교체합니다." }).check();
     await restoredPage.getByRole("button", { name: "가져오기 적용", exact: true }).click();
-    expect(await readData(restoredPage)).toEqual(original);
+    await expect.poll(() => readData(restoredPage)).toEqual(original);
     await restoredPage.reload(); expect(await readData(restoredPage)).toEqual(original);
   } finally { await context.close(); }
 });

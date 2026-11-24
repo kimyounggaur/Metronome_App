@@ -1,5 +1,5 @@
 import { createDefaultData, PRESETS_KEY, SETLISTS_KEY, SETTINGS_KEY } from "../domain/presets";
-import { parseBackup, parseBackupValue } from "../domain/migration";
+import { parseBackupValue } from "../domain/migration";
 import { formatIssues, validatePulseData } from "../domain/schema";
 import type { PulseData } from "../domain/types";
 
@@ -21,7 +21,7 @@ export function loadPulseData(storage: StorageLike): LoadedPulse {
   try {
     raw = storage.getItem(PULSE_DATA_KEY);
     if (raw !== null) {
-      const parsed = parseBackup(raw);
+      const parsed = parseBackupValue(JSON.parse(raw));
       if (!parsed.ok) return { data: fallback, storageError: `저장된 데이터를 읽지 못했습니다. 원본을 보존했습니다.\n${formatIssues(parsed.issues)}`, recoveryRaw: raw };
       return { data: parsed.data, storageError: null, recoveryRaw: null };
     }
@@ -33,12 +33,9 @@ export function loadPulseData(storage: StorageLike): LoadedPulse {
     };
     const parsed = parseBackupValue({ settings: parseKey(SETTINGS_KEY, legacyDefaultSettings()), presets: parseKey(PRESETS_KEY, []), setlists: parseKey(SETLISTS_KEY, []) });
     if (!parsed.ok) return { data: fallback, storageError: `이전 데이터 이관에 실패했습니다. 원본을 보존했습니다.\n${formatIssues(parsed.issues)}`, recoveryRaw: JSON.stringify(originals, null, 2) };
-    // Original v1 keys remain intact even when this single v2 write fails.
-    try { storage.setItem(PULSE_DATA_KEY, JSON.stringify(parsed.data)); }
-    catch { return { data: parsed.data, storageError: SAVE_FAILURE, recoveryRaw: JSON.stringify(originals, null, 2) }; }
     return { data: parsed.data, storageError: null, recoveryRaw: null };
   } catch (error) {
-    return { data: fallback, storageError: error instanceof Error && error.message.includes("JSON") ? error.message : SAVE_FAILURE, recoveryRaw: raw ?? (Object.keys(originals).length ? JSON.stringify(originals, null, 2) : null) };
+    return { data: fallback, storageError: error instanceof SyntaxError || (error instanceof Error && error.message.includes("JSON")) ? "저장된 데이터를 읽지 못했습니다. 원본을 보존했습니다. JSON 문법 오류" : SAVE_FAILURE, recoveryRaw: raw ?? (Object.keys(originals).length ? JSON.stringify(originals, null, 2) : null) };
   }
 }
 export function savePulseData(storage: StorageLike, data: PulseData): string | null {

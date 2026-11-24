@@ -48,6 +48,16 @@ export function normalizeAccents(accents: AccentLevel[], beats: number): AccentL
   return Array.from({ length: beats }, (_, index) => accents[index] ?? fallback[index]);
 }
 
+export function accentGroupStarts(accents: AccentLevel[], groups: number[]): AccentLevel[] {
+  const next = accents.slice();
+  let index = 0;
+  for (const size of groups) {
+    if (next[index] !== "mute") next[index] = "strong";
+    index += size;
+  }
+  return next;
+}
+
 export function cycleAccent(accent: AccentLevel): AccentLevel {
   switch (accent) {
     case "strong":

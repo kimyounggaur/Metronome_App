@@ -3,8 +3,9 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [react()],
+  optimizeDeps: { include: ["@streamparser/json"] },
   test: {
-    include: ["src/tests/**/*.test.{ts,tsx}"],
+    include: ["src/**/*.test.{ts,tsx}"],
     environment: "jsdom",
     globals: true,
     setupFiles: "./src/tests/setup.ts",

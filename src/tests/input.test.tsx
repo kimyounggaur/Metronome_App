@@ -1,6 +1,9 @@
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { NumberField } from "../components/NumberField";
+import { useMetronome } from "../hooks/useMetronome";
+import { defaultSettings } from "../domain/presets";
 import { BpmDisplay } from "../components/BpmDisplay";
 import { TransportBar } from "../components/TransportBar";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
@@ -59,7 +62,7 @@ describe("BPM editing and dragging", () => {
     expect(screen.getByRole("status")).toHaveTextContent(String(expected));
   });
 
-  it.each(["", "  ", "abc", "12bpm", "Infinity"])("restores the last valid value for invalid draft %j", (draft) => {
+  it.each(["", "  ", "abc", "12bpm", "Infinity", "123."])("restores the last valid value for invalid draft %j", (draft) => {
     render(<BpmHarness />);
     const input = screen.getByLabelText("BPM 직접 입력");
     fireEvent.focus(input);
@@ -79,7 +82,7 @@ describe("BPM editing and dragging", () => {
     expect(input).toHaveValue("120");
   });
 
-  it("Escape restores the edit-start value after an external change", () => {
+  it("R05 Escape displays the latest external tempo and preserves the trainer", () => {
     const onSetBpm = vi.fn();
     const view = render(<BpmDisplay bpm={120} timeSignature={signature} onSetBpm={onSetBpm} />);
     const input = screen.getByLabelText("BPM 직접 입력");
@@ -87,7 +90,49 @@ describe("BPM editing and dragging", () => {
     fireEvent.change(input, { target: { value: "99" } });
     view.rerender(<BpmDisplay bpm={140} timeSignature={signature} onSetBpm={onSetBpm} />);
     fireEvent.keyDown(input, { key: "Escape" });
-    expect(onSetBpm).toHaveBeenCalledExactlyOnceWith(120);
+    expect(onSetBpm).not.toHaveBeenCalled();
+    expect(input).toHaveValue("140");
+  });
+
+  it("R05 leaves disabled timer and trainer untouched on navigation", () => {
+    const commit = vi.fn();
+    render(<><NumberField label="시간" value={null} min={1} max={3600} placeholder="60" onChange={commit} />
+      <BpmDisplay bpm={84} timeSignature={signature} onSetBpm={commit} /></>);
+    const seconds = screen.getByLabelText("시간");
+    for (const input of [seconds, screen.getByLabelText("BPM 직접 입력")]) {
+      for (const key of ["Tab", "Enter", "Escape"]) {
+        fireEvent.focus(input);
+        fireEvent.keyDown(input, {key});
+        fireEvent.blur(input);
+      }
+    }
+    expect(commit).not.toHaveBeenCalled();
+    expect(seconds).toHaveValue(null);
+    fireEvent.focus(seconds);
+    fireEvent.change(seconds, {target: {value: "60"}});
+    fireEvent.keyDown(seconds, {key: "Enter"});
+    fireEvent.blur(seconds);
+    expect(commit).toHaveBeenCalledExactlyOnceWith(60);
+  });
+
+  it("R06 idle nudges start at the displayed saved BPM and compose within a frame", () => {
+    const hook = renderHook(() => {
+      const [settings, setSettings] = useState(() => {
+        const initial = structuredClone(defaultSettings);
+        initial.practice.speedTrainer.enabled = true;
+        return initial;
+      });
+      return { settings, controls: useMetronome({ settings, setSettings, onBeatSideEffect: vi.fn() }) };
+    });
+    expect(hook.result.current.controls.displayBpm).toBe(120);
+    act(() => hook.result.current.controls.nudgeBpm(1));
+    expect(hook.result.current.controls.displayBpm).toBe(121);
+    expect(hook.result.current.settings.practice.speedTrainer.enabled).toBe(false);
+    act(() => {
+      hook.result.current.controls.nudgeBpm(1);
+      hook.result.current.controls.nudgeBpm(1);
+    });
+    expect(hook.result.current.settings.bpm).toBe(123);
   });
 
   it.each(["pointerCancel", "lostPointerCapture"] as const)("distinguishes taps, clamps a drag, and rolls back on %s", (cancel) => {

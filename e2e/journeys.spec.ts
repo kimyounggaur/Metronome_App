@@ -63,6 +63,7 @@ test('journey A: count-in then sixty real seconds at 90 BPM in 3/4 with 2 subdiv
   await expect.poll(async () => page.evaluate(() => window.__pulseDiagnostics!.getDiagnostics().activeSources), { timeout: 2000 }).toBe(0);
   const stopped = await page.evaluate(() => ({ snapshot: window.__pulseDiagnostics!.getSnapshot(), diagnostics: window.__pulseDiagnostics!.getDiagnostics() }));
   const wallMilliseconds = Date.now() - wallStarted;
+  await record('journey-a', { browser: info.project.name || 'Chromium', viewport: page.viewportSize(), wallMilliseconds, started, stopped, pageErrors: pageErrors.get(page) }, info);
   expect(wallMilliseconds).toBeGreaterThanOrEqual(60_000);
   expect(wallMilliseconds).toBeLessThan(73_000);
   expect(stopped.snapshot).toMatchObject({ state: 'idle', currentEvent: null, timerRemainingSeconds: null });
@@ -70,7 +71,6 @@ test('journey A: count-in then sixty real seconds at 90 BPM in 3/4 with 2 subdiv
   expect(stopped.diagnostics.skippedEventCount).toBe(0);
   expect(stopped.diagnostics.duplicateEventCount).toBe(0);
   expect(stopped.diagnostics.lastScheduledTime).toBeLessThan(started.snapshot.timerDeadline!);
-  await record('journey-a', { browser: info.project.name || 'Chromium', viewport: page.viewportSize(), wallMilliseconds, started, stopped, pageErrors: pageErrors.get(page) }, info);
   await page.screenshot({ path: path.join(evidenceDir, 'journey-a-complete.png'), fullPage: true });
 });
 

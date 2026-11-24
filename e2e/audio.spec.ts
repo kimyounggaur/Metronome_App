@@ -42,3 +42,69 @@ test('rapid transport requests stay stopped and clear the visible beat',async({p
   await page.getByRole('button',{name:'정지',exact:true}).click();
   await expect(page.locator('[aria-label="박 시각화"]')).toContainText('—');
 });
+
+test("R08 audible waveform at mute release and atomic preset gain", async ({page}) => {
+  await page.goto("/");
+  const rendered = await page.evaluate(async () => {
+    const enginePath = "/src/audio/MetronomeEngine.ts";
+    const presetsPath = "/src/domain/presets.ts";
+    const {MetronomeEngine, settingsForEngine} = await import(enginePath);
+    const {defaultSettings} = await import(presetsPath);
+    async function render(mode: "control" | "unmute" | "preset" | "edit") {
+      const sampleRate = 44100;
+      const offline = new OfflineAudioContext(1, Math.ceil(sampleRate * 2.36), sampleRate);
+      const context = new Proxy(offline, {get(target, key) {
+        if (key === "state") return "running";
+        if (key === "close") return () => Promise.resolve();
+        const value = Reflect.get(target, key, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      }});
+      let now = 0;
+      let sessionId = 0;
+      const worker = {
+        onmessage: null as null | ((event: {data: {type: string; sessionId: number}}) => void),
+        onerror: null, terminate() {},
+        postMessage(message: {sessionId: number}) {
+          sessionId = message.sessionId;
+          queueMicrotask(() => this.onmessage?.({data: {type: "ready", sessionId}}));
+        },
+      };
+      const initial = settingsForEngine({...defaultSettings, muted: mode === "unmute"});
+      const engine = new MetronomeEngine(initial, undefined, {
+        createAudioContext: () => context, createWorker: () => worker,
+        requestFrame: () => 1, cancelFrame() {}, audioTime: () => now, diagnostics: true,
+      });
+      const preset = {...initial, volume: mode === "preset" ? 0 : 0.2};
+      await engine.start();
+      for (let ms = 5; ms <= 2350; ms += 5) {
+        now = ms / 1000;
+        if (ms % 25 === 0) worker.onmessage?.({data: {type: "tick", sessionId}});
+        if (mode === "unmute" && ms === 510) engine.updateSettings({...initial, muted: false});
+        if (mode === "preset" || mode === "edit") {
+          if (ms === 200) engine.updateSettings(preset, "preset");
+          if (mode === "preset" && ms === 300) engine.updateSettings({...preset, subdivision: "eighth"});
+          if (mode === "edit" && ms === 2010) engine.updateSettings({...preset, muted: true});
+          if (mode === "edit" && ms === 2030) engine.updateSettings(preset);
+        }
+      }
+      const channel = (await offline.startRendering()).getChannelData(0);
+      const peaks = [0.06, 0.56, 1.06, 1.56, 2.06, 2.31].map(time => {
+        const window = channel.subarray(Math.round(time * sampleRate), Math.round((time + 0.04) * sampleRate));
+        return Math.max(...window.map(sample => Math.abs(sample)));
+      });
+      engine.dispose();
+      return peaks;
+    }
+    return {control: await render("control"), unmute: await render("unmute"), preset: await render("preset"), edit: await render("edit")};
+  });
+  expect(rendered.unmute[0]).toBe(0);
+  expect(rendered.unmute[1]).toBeCloseTo(rendered.control[1], 5);
+  expect(rendered.unmute[1]).toBeGreaterThan(0.05);
+  for (const index of [1, 2, 3]) {
+    expect(rendered.preset[index]).toBeCloseTo(rendered.control[index], 5);
+    expect(rendered.preset[index]).toBeGreaterThan(0.05);
+  }
+  expect(rendered.preset.slice(4)).toEqual([0, 0]);
+  expect(rendered.edit[4]/rendered.control[4]).toBeCloseTo(0.20/0.82, 5);
+  await test.info().attach("R08-peak-by-audio-time", {contentType: "application/json", body: JSON.stringify(rendered)});
+});
