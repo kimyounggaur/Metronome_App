@@ -81,11 +81,58 @@ button,
   padding-block: 1rem;
 }
 
+.beat-group {
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+.beat-group-marked {
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  padding: 0.25rem;
+}
+.beat-group button:disabled { opacity: 0.65; }
+.cell-pulse {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+  height: 0.5rem;
+  color: var(--accent);
+}
+.cell-pulse > span {
+  width: 0.9rem;
+  height: 0.4rem;
+  border: 1px solid var(--subtle);
+  border-radius: 0.25rem;
+}
+.cell-pulse > .cell-pulse-on {
+  border-color: currentColor;
+  background: currentColor;
+}
+.performance-status {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
 .performance-bpm {
   font-size: clamp(4rem, 23vw, 15rem);
 }
 
 @media (max-height: 700px) {
+  .performance-screen { gap: 0.25rem; }
+  .performance-content { padding-block: 0.25rem; }
+  .performance-controls { gap: 0.4rem; }
+  .performance-transport { gap: 0.5rem; }
+  .performance-transport button { width: 3rem; height: 3rem; }
   .bpm-number {
     font-size: clamp(4rem, 22vw, 7rem);
   }
@@ -161,6 +208,7 @@ button,
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .beat-readout { width: 5rem; height: 5rem; }
   *,
   *::before,
   *::after {

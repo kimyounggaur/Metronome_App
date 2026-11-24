@@ -99,3 +99,73 @@ describe("engine practice integration", () => {
     engine.dispose();
   });
 });
+
+describe("R08 scheduled clicks and mixer boundaries", () => {
+  it("reuses the already reserved click at 0.56 when unmuted at 0.51", async () => {
+    const h = engineHarness();
+    const initial = { ...config(), muted: true };
+    const engine = new MetronomeEngine(initial, undefined, h.dependencies);
+    await engine.start(); advance(h, 0.505);
+    expect(h.context.oscillators.map(voice => voice.starts[0])).toEqual([0.06, 0.56]);
+    h.tick(0.51); engine.updateSettings({ ...initial, muted: false });
+    advance(h, 1.1);
+    expect(h.context.oscillators.map(voice => voice.starts[0])).toEqual([0.06, 0.56, 1.06]);
+    expect(engine.getDiagnostics().totalVoiceCount).toBe(3);
+    engine.dispose();
+  });
+
+  it("keeps a preset gain and subdivision on the same effective bar", async () => {
+    const h = engineHarness();
+    const initial = config();
+    const preset = { ...initial, volume: 0 };
+    const engine = new MetronomeEngine(initial, undefined, h.dependencies);
+    await engine.start(); advance(h, 0.20);
+    engine.updateSettings(preset, "preset", "quiet");
+    h.tick(0.30); engine.updateSettings({ ...preset, subdivision: "eighth" });
+    advance(h, 1.95);
+    const master = h.context.gains[0].gain;
+    expect(master.events.filter(event => event.value === 0)).toEqual([]);
+    advance(h, 2.01);
+    expect(master.events.find(event => event.value === 0)?.time).toBeCloseTo(2.06);
+    expect(engine.getSnapshot().currentEvent?.presetId).toBeNull();
+    advance(h, 2.4);
+    expect(engine.getSnapshot().currentEvent).toMatchObject({ presetId: "quiet", subdivision: "eighth" });
+    expect(h.context.oscillators.map(source => source.starts[0])).toContain(2.31);
+    engine.dispose();
+  });
+
+  it.each([false, true])("keeps the reserved level after mixer edits (replace volume %s)", async replaceVolume => {
+    const h = engineHarness();
+    const initial = config();
+    const preset = { ...initial, volume: 0.20 };
+    const engine = new MetronomeEngine(initial, undefined, h.dependencies);
+    await engine.start(); advance(h, 0.20); engine.updateSettings(preset, "preset");
+    advance(h, 2.00);
+    const master = h.context.gains[0].gain;
+    h.tick(2.01); engine.updateSettings({ ...preset, muted: true });
+    expect(master.events.at(-1)).toMatchObject({time: 2.06, value: 0});
+    h.tick(2.03); engine.updateSettings(preset);
+    expect(master.events.at(-2)).toMatchObject({value: 0.82});
+    expect(master.events.at(-1)).toMatchObject({time: 2.06, value: 0.20});
+    h.tick(2.056);
+    engine.updateSettings(replaceVolume ? { ...preset, volume: 0.40 } : { ...preset, muted: true });
+    const segment = master.events.slice(master.events.map(event => event.type).lastIndexOf("cancel"));
+    expect(segment.every(event => event.time <= 2.06)).toBe(true);
+    expect(segment.at(-1)).toMatchObject({time: 2.06, value: replaceVolume ? 0.4 : 0});
+    engine.dispose();
+  });
+
+  it("schedules the name of musically identical presets with each reserved bar", async () => {
+    const h = engineHarness();
+    const initial = config();
+    const engine = new MetronomeEngine(initial, undefined, h.dependencies);
+    await engine.start("A"); advance(h, .2);
+    engine.updateSettings(initial, "preset", "B"); advance(h, 2.0);
+    expect(engine.getSnapshot().currentEvent?.presetId).toBe("A");
+    engine.updateSettings(initial, "preset", "C"); advance(h, 2.2);
+    expect(engine.getSnapshot().currentEvent?.presetId).toBe("B");
+    advance(h, 4.2);
+    expect(engine.getSnapshot().currentEvent?.presetId).toBe("C");
+    engine.dispose();
+  });
+});

@@ -111,6 +111,7 @@ export interface BeatEvent {
 // Snapshot of the musical settings that actually produced this event.
 export interface BeatEvent {
   sessionId: number;
+  presetId?: string | null;
   bpm: number;
   tempoUnit: TempoUnit;
   timeSignature: TimeSignature;

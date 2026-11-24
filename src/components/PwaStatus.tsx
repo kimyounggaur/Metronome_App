@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { Download, RefreshCw, X } from "lucide-react";
-import { applyPwaUpdate, requestPwaInstall, usePwa } from "../pwa";
+import { applyPwaUpdate, requestPwaInstall, retryOffline, usePwa } from "../pwa";
 
 interface PwaStatusProps {
   isPlaying: boolean;
   onStop?: () => void | Promise<void>;
-  onBeforeUpdate?: () => void | Promise<void>;
+  onBeforeUpdate?: () => void | boolean | Promise<void | boolean>;
   showInstallHint?: boolean;
   onDismissInstall?: () => void;
 }
@@ -20,20 +20,30 @@ export function PwaStatus({ isPlaying, onStop, onBeforeUpdate, showInstallHint =
   return <section className="mx-auto flex w-full max-w-[1180px] flex-col gap-2 px-4 pb-4 text-xs text-[color:var(--muted)]" aria-label="설치와 오프라인 상태">
     {pwa.offline === "ready" ? <p role="status">오프라인 사용 준비 완료</p> : null}
     {pwa.offline === "preparing" ? <p role="status">오프라인 사용 준비 중…</p> : null}
-    {pwa.offline === "error" ? <p role="status">오프라인 준비를 완료하지 못했습니다. 온라인에서 다시 열어 주세요.</p> : null}
-    {pwa.updateReady ? <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl p-3 surface">
-      <span role="status">업데이트 준비됨{isPlaying ? " · 연습을 마친 뒤 적용할 수 있어요." : ""}</span>
+    {pwa.offline === "error" || pwa.candidateFailed ? <div>
+      <p role="status">{pwa.offline === "error" ? "오프라인 준비를 완료하지 못했습니다." : "새 버전을 준비하지 못했습니다. 현재 버전으로 연습할 수 있어요."}</p>
+      <button type="button" className="touch-target underline" onClick={() => void retryOffline()}>다시 확인</button>
+    </div> : null}
+    {pwa.updateReady || pwa.newerActive ? <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl p-3 surface">
+      <span role="status">{pwa.newerActive ? "다른 탭에서 새 버전을 적용했습니다." : "업데이트 준비됨"}{isPlaying ? " · 연습을 마친 뒤 적용할 수 있어요." : ""}</span>
       <button type="button" disabled={applying || (isPlaying && !onStop)} className="touch-target inline-flex items-center gap-2 rounded-xl px-3 surface-2 disabled:opacity-50" onClick={async () => {
+        setError(null);
         setApplying(true);
         try {
           if (isPlaying) await onStop?.();
-          await onBeforeUpdate?.();
-          applyPwaUpdate();
+          if (await onBeforeUpdate?.() === false) throw new Error("저장 실패");
+          const result = await applyPwaUpdate();
+          if (result === "accepted") {
+            // Activation may have taken several seconds; persist edits made while the worker was waiting.
+            if (await onBeforeUpdate?.() === false) throw new Error("저장 실패");
+            window.location.reload();
+          }
+          if (result === "blocked") setError("열린 메트로놈 탭에서 연습을 마치고 닫은 뒤 다시 시도해 주세요.");
+          if (result === "failed") setError("버전 전환을 확인하지 못했습니다. 다시 시도해 주세요.");
         } catch {
-          setApplying(false);
-          setError("업데이트를 적용하지 못했습니다. 잠시 후 다시 시도해 주세요.");
-        }
-      }}><RefreshCw size={16} aria-hidden="true" />{applying ? "적용 중…" : isPlaying ? "정지 후 업데이트 적용" : "업데이트 적용"}</button>
+          setError("저장을 완료하지 못했습니다. 현재 자료를 백업하거나 저장을 다시 시도해 주세요.");
+        } finally { setApplying(false); }
+      }}><RefreshCw size={16} aria-hidden="true" />{applying ? "적용 중…" : pwa.newerActive ? "연습을 마치고 새 버전 열기" : isPlaying ? "정지 후 업데이트 적용" : "업데이트 적용"}</button>
     </div> : null}
     {canShowInstall ? <div className="rounded-2xl p-3 surface">
       <div className="flex items-center justify-between gap-2">

@@ -1,3 +1,4 @@
+import { MasterOutput } from "./MasterOutput";
 import { clickSpecFor, scheduleClick, type ScheduledClick } from "./clickFactory";
 import { EVENT_TIME_EPSILON, INTERRUPTION_SECONDS, LOOKAHEAD_MS, SCHEDULE_AHEAD_TIME, STOP_FADE_SECONDS, type SchedulerWorkerMessage } from "./schedulerTypes";
 import { createPracticeSession, planNextEvent, type PlannerSettings, type PracticeSessionState } from "../domain/planner";
@@ -18,7 +19,7 @@ export interface EngineSnapshot {
   mainStartedAt: number | null;
   timerDeadline: number | null;
 }
-export interface EngineCallbacks { onBeat: (event: BeatEvent) => void }
+export interface EngineCallbacks { onBeat: (event: BeatEvent, cellStart?: BeatEvent) => void }
 export interface SchedulerPort {
   onmessage: ((event: MessageEvent<SchedulerWorkerMessage>) => void) | null;
   onerror: ((event: ErrorEvent) => void) | null;
@@ -62,6 +63,9 @@ export function settingsForEngine(settings: AppSettings): EngineSettings {
 export class MetronomeEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
+  private output: MasterOutput | null = null;
+  private desiredPresetId: string | null = null;
+  private scheduledPresetId: string | null = null;
   private sessionGain: GainNode | null = null;
   private worker: SchedulerPort | null = null;
   private frameId: number | null = null;
@@ -88,6 +92,7 @@ export class MetronomeEngine {
   private skippedEventCount = 0;
   private totalScheduledCount = 0;
   private totalAudibleScheduledCount = 0;
+  private totalVoiceCount = 0;
   private firstScheduledTime: number | null = null;
   private lastScheduledTime: number | null = null;
   private maxQueueLength = 0;
@@ -108,13 +113,44 @@ export class MetronomeEngine {
   setCallbacks(callbacks: EngineCallbacks): void { this.callbacks = callbacks; }
   getDiagnostics() { return { records: [...this.diagnostics], lateEventCount: this.lateEventCount, skippedEventCount: this.skippedEventCount,
     queueLength: this.notesInQueue.length, sessionId: this.generation, activeSources: this.sources.size,
-    totalScheduledCount: this.totalScheduledCount, totalAudibleScheduledCount: this.totalAudibleScheduledCount,
+    totalScheduledCount: this.totalScheduledCount, totalAudibleScheduledCount: this.totalAudibleScheduledCount, totalVoiceCount: this.totalVoiceCount,
     firstScheduledTime: this.firstScheduledTime, lastScheduledTime: this.lastScheduledTime, maxQueueLength: this.maxQueueLength,
     maxWorkerTickGap: this.maxWorkerTickGap, duplicateEventCount: this.duplicateEventCount, visualDeliveredTime: this.visualDeliveredTime }; }
   get isActive(): boolean { return this.snapshot.state === "playing"; }
   get currentTime(): number { return this.ctx ? this.dependencies.audioTime(this.ctx) : 0; }
-  updateSettings(settings: EngineSettings, source: SettingsSource = "settings"): void {
-    if (JSON.stringify(settings) === JSON.stringify(this.desiredSettings)) return;
+  /** Undo just the transport effects of a canceled BPM drag, retaining the
+   * current bar, timer, mixer changes and every already-reserved voice. */
+  captureTempoRollback(): () => number | undefined {
+    const sessionId = this.generation;
+    const plan = this.plan;
+    if (!this.isActive || !plan) return () => undefined;
+    const saved = {
+      bpm: this.settings.bpm, enabled: this.settings.practice.speedTrainer.enabled,
+      trainingBpm: plan.bpm, segment: plan.speedSegmentStartBar,
+      holding: plan.speedHolding, speedKey: plan.speedConfigKey,
+    };
+    return () => {
+      if (sessionId !== this.generation || !this.isActive || !this.plan || this.plan.phase === "complete") return;
+      this.settings.bpm = saved.bpm;
+      this.settings.practice.speedTrainer.enabled = saved.enabled;
+      this.plan.bpm = saved.trainingBpm;
+      this.plan.speedSegmentStartBar = saved.segment;
+      this.plan.speedHolding = saved.holding;
+      this.plan.speedConfigKey = saved.speedKey;
+      const bpm = saved.enabled ? saved.trainingBpm : saved.bpm;
+      this.retimeNext(bpm);
+      return bpm;
+    };
+  }
+  private retimeNext(bpm: number): void {
+    if (!this.plan || this.plan.phase === "complete" || !this.lastPlannedEvent) return;
+    // Reserved events are immutable. Scheduler subsequently skips recalculated
+    // positions that have already passed without creating catch-up voices.
+    this.plan.time = this.lastPlannedEvent.time + secondsPerSubdivision(bpm, this.settings.subdivision, this.settings.timeSignature, this.settings.tempoUnit);
+  }
+  updateSettings(settings: EngineSettings, source: SettingsSource = "settings", presetId = this.desiredPresetId): void {
+    if (JSON.stringify(settings) === JSON.stringify(this.desiredSettings) && presetId === this.desiredPresetId && source !== "manual") return;
+    this.desiredPresetId = presetId;
     const previous = this.desiredSettings;
     this.desiredSettings = structuredClone(settings);
     if (!this.isActive) this.settings = structuredClone(settings);
@@ -128,49 +164,43 @@ export class MetronomeEngine {
       const shouldQueue = source === "preset" || this.pending !== null || key(previous) !== key(settings);
       if (shouldQueue) this.pending = next;
       if (source !== "preset") {
-        this.settings.volume = next.volume;
-        this.settings.muted = next.muted;
+        const outputPatch: Partial<Pick<EngineSettings, "volume" | "muted">> = {};
+        if (next.volume !== previous.volume) outputPatch.volume = next.volume;
+        if (next.muted !== previous.muted) outputPatch.muted = next.muted;
+        if (Object.keys(outputPatch).length) {
+          Object.assign(this.settings, outputPatch);
+          this.output?.edit(this.currentTime, outputPatch);
+        }
         if (next.bpm !== previous.bpm || source === "manual") {
           this.settings.bpm = next.bpm;
-          if (this.plan && this.plan.phase !== "complete" && this.lastPlannedEvent) {
-            // The previous event is already reserved and must not move. Its following
-            // interval is still unreserved; recalculate it using the effective meter.
-            // If acceleration puts it in the past, scheduler advances those positions
-            // without creating sources, retaining the normal missed-event policy.
-            this.plan.time = this.lastPlannedEvent.time + secondsPerSubdivision(next.bpm, this.settings.subdivision, this.settings.timeSignature, this.settings.tempoUnit);
-          }
+          this.retimeNext(next.bpm);
         }
         if (source === "manual") this.settings.practice.speedTrainer.enabled = false;
       }
       if (shouldQueue) this.emit({ pendingSettings: true });
     }
-    if (source !== "preset" && this.masterGain && this.ctx) {
-      const gain = this.masterGain.gain;
-      gain.cancelScheduledValues(this.currentTime);
-      gain.setTargetAtTime(settings.muted ? 0 : clampVolume(settings.volume), this.currentTime, 0.005);
-      gain.setValueAtTime(settings.muted ? 0 : clampVolume(settings.volume), this.currentTime + STOP_FADE_SECONDS);
-    }
   }
-  start(): Promise<void> {
+  start(presetId = this.desiredPresetId): Promise<void> {
     if (this.disposed) return Promise.reject(new Error("오디오 엔진이 종료되었습니다."));
     if (this.snapshot.state === "playing") return Promise.resolve();
     if (this.snapshot.state === "starting" && this.startPromise) return this.startPromise;
+    this.desiredPresetId = presetId;
     const sessionId = ++this.generation;
     this.emit({ state: "starting", error: null, sessionId, currentEvent: null });
     // Creation and resume are called synchronously on the user's gesture path.
     try {
       this.ensureContext();
+      const worker = this.dependencies.createWorker();
+      this.worker = worker;
       const resume = this.ctx!.state === "running" ? Promise.resolve() : this.ctx!.resume();
-      const ready = this.prepareWorker(sessionId);
-      this.startPromise = Promise.all([resume, ready]).then(() => {
+      this.startPromise = this.prepareWorker(worker, sessionId, resume).then(() => {
         if (this.disposed || sessionId !== this.generation) return;
         if (this.ctx!.state !== "running") throw new Error("오디오 재개가 허용되지 않았습니다. 재생을 다시 눌러 주세요.");
         this.sessionGain = this.ctx!.createGain();
         this.sessionGain.gain.setValueAtTime(1, this.currentTime);
         this.sessionGain.connect(this.masterGain!);
         this.resetTimeline();
-        this.masterGain!.gain.cancelScheduledValues(this.currentTime);
-        this.masterGain!.gain.setValueAtTime(this.settings.muted ? 0 : this.settings.volume, this.currentTime);
+        this.output = new MasterOutput(this.masterGain!.gain, this.currentTime, this.settings);
         this.lastTickTime = this.currentTime;
         this.emit({ state: "playing", timerRemainingSeconds: this.settings.practice.timerSeconds });
         this.scheduler();
@@ -213,11 +243,11 @@ export class MetronomeEngine {
   private onContextStateChange = () => {
     if (this.isActive && this.ctx?.state !== "running") this.finish("interrupted", "오디오가 중단되었습니다. 재생을 누르면 새 연습을 시작합니다.");
   };
-  private prepareWorker(sessionId: number): Promise<void> {
-    const worker = this.dependencies.createWorker();
-    this.worker = worker;
+  private prepareWorker(worker: SchedulerPort, sessionId: number, resume: Promise<void>): Promise<void> {
     return new Promise((resolve, reject) => {
       let settled = false;
+      let workerReady = false;
+      let audioReady = false;
       const settle = (error?: Error) => {
         if (settled) return;
         settled = true;
@@ -225,11 +255,13 @@ export class MetronomeEngine {
         if (this.worker === worker) this.cancelReady = null;
         if (error) reject(error); else resolve();
       };
-      const timeout = this.dependencies.setTimer(() => settle(new Error("오디오 예약 Worker의 준비 시간이 초과되었습니다.")), 2000);
+      const finishIfReady = () => { if (workerReady && audioReady) settle(); };
+      const timeout = this.dependencies.setTimer(() => settle(new Error("오디오와 예약 Worker의 준비 시간이 초과되었습니다.")), 2000);
+      resume.then(() => { audioReady = true; finishIfReady(); }, error => settle(error instanceof Error ? error : new Error("오디오를 재개하지 못했습니다.")));
       this.cancelReady = () => settle();
       worker.onmessage = (event) => {
         if (this.disposed || sessionId !== this.generation || event.data.sessionId !== sessionId) return;
-        if (event.data.type === "ready") settle();
+        if (event.data.type === "ready") { workerReady = true; finishIfReady(); }
         if (event.data.type === "tick") this.scheduler();
       };
       worker.onerror = () => {
@@ -248,12 +280,8 @@ export class MetronomeEngine {
     if (this.worker) { this.worker.onmessage = null; this.worker.onerror = null; this.worker.terminate(); this.worker = null; }
     if (this.frameId !== null) { this.dependencies.cancelFrame(this.frameId); this.frameId = null; }
     this.notesInQueue = [];
-    if (this.masterGain) {
-      const gain = this.masterGain.gain;
-      const currentValue = gain.value;
-      gain.cancelScheduledValues(this.currentTime);
-      gain.setValueAtTime(currentValue, this.currentTime);
-    }
+    this.output?.stop(this.currentTime);
+    this.output = null;
     if (this.sessionGain) {
       const gain = this.sessionGain;
       const now = this.currentTime;
@@ -278,11 +306,12 @@ export class MetronomeEngine {
     this.pending = null;
     this.pendingAppliedAt = null;
     this.notesInQueue = [];
+    this.scheduledPresetId = this.desiredPresetId;
     this.plan = createPracticeSession(this.settings, this.currentTime + 0.06);
     this.lastPlannedEvent = null;
     this.scheduledCutoff = null;
     this.lastScheduledTime = this.firstScheduledTime = null;
-    this.totalScheduledCount = this.totalAudibleScheduledCount = this.duplicateEventCount = 0;
+    this.totalScheduledCount = this.totalAudibleScheduledCount = this.totalVoiceCount = this.duplicateEventCount = 0;
     this.maxQueueLength = this.maxWorkerTickGap = 0;
     this.lateEventCount = this.skippedEventCount = 0;
     this.diagnostics = [];
@@ -299,8 +328,8 @@ export class MetronomeEngine {
         this.settings = this.pending;
         this.pending = null;
         this.pendingAppliedAt = this.plan.time;
-        const target = this.settings.muted ? 0 : this.settings.volume;
-        this.masterGain!.gain.setValueAtTime(target, this.plan.time);
+        this.scheduledPresetId = this.desiredPresetId;
+        this.output!.atBar(now, this.plan.time, this.settings);
       }
       const planned = planNextEvent(this.plan, this.settings, this.dependencies.random, this.generation);
       this.plan = planned.state;
@@ -311,6 +340,7 @@ export class MetronomeEngine {
       if (this.plan.stopAt !== null) this.scheduleCutoff(this.plan.stopAt);
       const event = planned.event;
       if (!event) break;
+      event.presetId = this.scheduledPresetId;
       this.lastPlannedEvent = event;
       const skipped = event.time < now - EVENT_TIME_EPSILON;
       if (skipped) { this.lateEventCount++; this.skippedEventCount++; }
@@ -322,9 +352,13 @@ export class MetronomeEngine {
         if (this.firstScheduledTime === null) this.firstScheduledTime = event.time;
         if (this.lastScheduledTime !== null && event.time <= this.lastScheduledTime) this.duplicateEventCount++;
         this.lastScheduledTime = event.time;
-        if (event.isAudible) {
+        if (!event.accentRest && !event.gapMute && !event.randomMute) {
           const click = clickSpecFor(event.accent, this.settings.sound);
-          if (click) { this.totalAudibleScheduledCount++; this.sources.add(scheduleClick(this.ctx, this.sessionGain, Math.max(event.time, now), click, this.settings.sound, (source) => this.sources.delete(source))); }
+          if (click) {
+            this.totalVoiceCount++;
+            if (event.isAudible && this.settings.volume > 0) this.totalAudibleScheduledCount++;
+            this.sources.add(scheduleClick(this.ctx, this.sessionGain, Math.max(event.time, now), click, this.settings.sound, source => this.sources.delete(source)));
+          }
         }
       }
       if (this.dependencies.diagnostics) {
@@ -347,12 +381,16 @@ export class MetronomeEngine {
     const loop = () => {
       if (!this.isActive || sessionId !== this.generation) return;
       let latest: BeatEvent | undefined;
-      while (this.notesInQueue.length && this.notesInQueue[0].time <= this.currentTime) latest = this.notesInQueue.shift();
+      let cellStart: BeatEvent | undefined;
+      while (this.notesInQueue.length && this.notesInQueue[0].time <= this.currentTime) {
+        latest = this.notesInQueue.shift()!;
+        if (latest.subIndex === 0) cellStart = latest.showVisual ? latest : undefined;
+      }
       if (latest) {
         this.visualDeliveredTime = this.currentTime;
         const pendingSettings = this.pending !== null || (this.pendingAppliedAt !== null && latest.time < this.pendingAppliedAt);
         if (!pendingSettings) this.pendingAppliedAt = null;
-        this.emit({ currentEvent: latest, pendingSettings }); this.callbacks.onBeat(latest);
+        this.emit({ currentEvent: latest, pendingSettings }); this.callbacks.onBeat(latest, latest.showVisual ? cellStart : undefined);
       }
       this.frameId = this.dependencies.requestFrame(loop);
     };

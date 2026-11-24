@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { applyPreset, createDefaultData, createPreset, isAppSettings, isPresetArray, isSetlistArray, PRESETS_KEY, SETLISTS_KEY, SETTINGS_KEY } from "../domain/presets";
 import { mergeBackup, parseBackup, parseBackupValue } from "../domain/migration";
 import { formatIssues, validatePulseData } from "../domain/schema";
 import { loadPulseData, PULSE_DATA_KEY, SAVE_FAILURE, savePulseData, type StorageLike } from "../storage/pulseStorage";
+import { IDBFactory } from "fake-indexeddb";
+import { commitChange, openPulseDb, readSnapshot } from "../storage/pulseDb";
 import { usePulseStorage } from "../hooks/usePulseStorage";
 
 function sample() {
@@ -27,8 +29,8 @@ function memoryStorage(initial: Record<string, string> = {}) {
   const values = new Map(Object.entries(initial));
   return { values, getItem: vi.fn((key: string) => values.get(key) ?? null), setItem: vi.fn((key: string, value: string) => { values.set(key, value); }) } satisfies StorageLike & { values: Map<string, string> };
 }
-beforeEach(() => { localStorage.clear(); });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+beforeEach(() => { localStorage.clear(); sessionStorage.clear(); vi.stubGlobal("indexedDB", new IDBFactory()); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("strict backup schema", () => {
   it("rejects the original crashing settings and partial preset", () => {
@@ -84,9 +86,9 @@ describe("v1 migration and transaction storage", () => {
     }
   });
   it("explicitly rejects /16 legacy data", () => { const old = legacy(); old.settings.timeSignature.noteValue = 16; const result = parseBackupValue(old); expect(result.ok).toBe(false); if (!result.ok) expect(result.issues.some((i) => i.path === "settings.timeSignature.noteValue")).toBe(true); });
-  it("writes one envelope while preserving all original v1 bytes", () => {
+  it("reads legacy content without modifying any original bytes", () => {
     const old = legacy(); const raws = { [SETTINGS_KEY]: JSON.stringify(old.settings), [PRESETS_KEY]: JSON.stringify(old.presets), [SETLISTS_KEY]: JSON.stringify(old.setlists) }; const storage = memoryStorage(raws); const loaded = loadPulseData(storage);
-    expect(loaded.storageError).toBeNull(); expect(storage.setItem).toHaveBeenCalledTimes(1); expect(storage.values.has(PULSE_DATA_KEY)).toBe(true);
+    expect(loaded.storageError).toBeNull(); expect(storage.setItem).not.toHaveBeenCalled(); expect(storage.values.has(PULSE_DATA_KEY)).toBe(false);
     for (const [key, raw] of Object.entries(raws)) expect(storage.values.get(key)).toBe(raw);
   });
   it("does not overwrite a corrupt v2 or malformed v1 origin", () => {
@@ -94,7 +96,7 @@ describe("v1 migration and transaction storage", () => {
   });
   it("retains original v1 data and migrated memory when quota is denied", () => {
     const old = legacy(); const storage = memoryStorage({ [SETTINGS_KEY]: JSON.stringify(old.settings), [PRESETS_KEY]: JSON.stringify(old.presets), [SETLISTS_KEY]: JSON.stringify(old.setlists) }); storage.setItem.mockImplementation(() => { throw new DOMException("quota", "QuotaExceededError"); });
-    const loaded = loadPulseData(storage); expect(loaded.data.settings.practice.timerSeconds).toBe(180); expect(loaded.storageError).toBe(SAVE_FAILURE); expect(loaded.recoveryRaw).toContain(SETTINGS_KEY); expect(storage.values.has(PULSE_DATA_KEY)).toBe(false);
+    const loaded = loadPulseData(storage); expect(loaded.data.settings.practice.timerSeconds).toBe(180); expect(loaded.storageError).toBeNull(); expect(loaded.recoveryRaw).toBeNull(); expect(storage.values.has(PULSE_DATA_KEY)).toBe(false);
   });
   it("rejects invalid writes before storage is touched", () => { const storage = memoryStorage(); const d = sample(); d.setlists[0].items[0].presetId = "missing"; expect(savePulseData(storage, d)).toContain("presetId"); expect(storage.setItem).not.toHaveBeenCalled(); });
   it("remaps colliding IDs and references as one merge plan", () => {
@@ -105,28 +107,68 @@ describe("v1 migration and transaction storage", () => {
 });
 
 describe("storage React boundary", () => {
-  it("keeps unsaved memory and allows backup when localStorage rejects writes", () => {
-    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("denied", "SecurityError"); });
-    const { result } = renderHook(() => usePulseStorage());
-    act(() => result.current.setSettings((settings) => ({ ...settings, bpm: 90 })));
-    act(() => { expect(result.current.flush()).toBe(false); });
-    expect(result.current.settings.bpm).toBe(90); expect(result.current.storageError).toBe(SAVE_FAILURE); expect(JSON.parse(result.current.exportJson()).settings.bpm).toBe(90); expect(spy).toHaveBeenCalled();
+  async function mount() {
+    const hook = renderHook(() => usePulseStorage());
+    await waitFor(() => expect(hook.result.current.ready).toBe(true));
+    return hook.result;
+  }
+  it("keeps unsaved memory and allows backup when IndexedDB rejects writes", async () => {
+    const result = await mount();
+    vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(() => { throw new DOMException("quota", "QuotaExceededError"); });
+    await act(async () => { result.current.setSettings(settings => ({...settings,bpm:90})); expect(await result.current.flush()).toBe(false); });
+    expect(result.current.settings.bpm).toBe(90); expect(result.current.storageError).toBe(SAVE_FAILURE); expect(JSON.parse(result.current.exportJson()).settings.bpm).toBe(90);
   });
-  it("does not silently save fallback after finding damaged data", () => {
-    localStorage.setItem(PULSE_DATA_KEY, "invalid"); const spy = vi.spyOn(Storage.prototype, "setItem"); const { result } = renderHook(() => usePulseStorage());
-    act(() => result.current.setSettings((settings) => ({ ...settings, bpm: 88 })));
-    expect(result.current.settings.bpm).toBe(88); expect(result.current.recoveryRaw).toBe("invalid"); expect(localStorage.getItem(PULSE_DATA_KEY)).toBe("invalid"); expect(spy).not.toHaveBeenCalled();
+  it("opens canonical data and a separate unsaved-draft download after reload", async () => {
+    const first = renderHook(() => usePulseStorage());
+    await waitFor(() => expect(first.result.current.ready).toBe(true));
+    const denial=vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(() => { throw new DOMException("full","QuotaExceededError"); });
+    await act(async () => { first.result.current.setSettings(s => ({ ...s, bpm: 91 })); expect(await first.result.current.flush()).toBe(false); });
+    first.unmount();
+    await new Promise(resolve=>setTimeout(resolve,10));
+    denial.mockRestore();
+    const second = await mount();
+    expect(second.current.settings.bpm).toBe(120);
+    expect(second.current.recovery?.source).toBe("이전 미저장 초안");
+    expect(JSON.parse(second.current.recoveryRaw!).settings.bpm).toBe(91);
   });
-  it("refuses invalid imports and preserves all prior state", () => {
-    const { result } = renderHook(() => usePulseStorage()); const before = result.current.exportJson(); const bad = sample(); bad.settings.volume = 9;
-    act(() => { expect(result.current.importData(bad, "replace")).toBe(false); }); expect(result.current.exportJson()).toBe(before);
+  it("does not silently persist fallback after finding damaged data", async () => {
+    localStorage.setItem(PULSE_DATA_KEY, "invalid");
+    const result = await mount();
+    await act(async () => { result.current.setSettings(settings => ({...settings,bpm:88})); expect(await result.current.flush()).toBe(false); });
+    expect(result.current.recoveryRaw).toBe("invalid"); expect(localStorage.getItem(PULSE_DATA_KEY)).toBe("invalid"); expect(result.current.settings.bpm).toBe(88);
   });
-  it("does not apply replacement if persistence fails", () => {
-    const { result } = renderHook(() => usePulseStorage()); const before = result.current.exportJson(); vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("full"); });
-    act(() => { expect(result.current.importData(sample(), "replace")).toBe(false); }); expect(result.current.exportJson()).toBe(before);
+  it("refuses invalid imports and preserves all prior state", async () => {
+    const result = await mount(); const before=result.current.exportJson();const bad=sample();bad.settings.volume=9;
+    await act(async () => { expect(await result.current.importData(bad,"replace")).toBe(false); });expect(result.current.exportJson()).toBe(before);
   });
-  it("restores validated backup with a single complete payload", () => {
-    const { result } = renderHook(() => usePulseStorage()); const incoming = sample(); act(() => { expect(result.current.importData(incoming, "replace")).toBe(true); });
-    expect(result.current.data).toEqual(incoming); expect(JSON.parse(localStorage.getItem(PULSE_DATA_KEY)!)).toEqual(incoming);
+  it("preserves active data if import stage cannot write", async () => {
+    const result=await mount();const before=result.current.exportJson();
+    vi.spyOn(IDBObjectStore.prototype,"put").mockImplementation(()=>{throw new DOMException("full","QuotaExceededError");});
+    await act(async()=>{expect(await result.current.importData(sample(),"replace")).toBe(false);});expect(result.current.exportJson()).toBe(before);
+  });
+  it("keeps external tempo out of active playback during a local theme-only commit", async () => {
+    const { result } = renderHook(() => usePulseStorage({ isPlaybackActive: () => true }));
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    const connection = await openPulseDb();
+    try {
+      const base = await readSnapshot(connection);
+      const next = { ...base.data, settings: { ...base.data.settings, bpm: 86 } };
+      await commitChange(connection, { base: base.data, next, generation: base.generation, operationId: crypto.randomUUID() }, base);
+      await act(async () => {
+        result.current.setSettings(s => ({ ...s, theme: "light" }));
+        expect(await result.current.flush()).toBe(true);
+      });
+      expect(result.current.settings.bpm).toBe(120);
+      expect(result.current.remoteUpdate).toBe(true);
+      expect((await readSnapshot(connection)).data.settings).toMatchObject({ bpm: 86, theme: "light" });
+      await act(async () => { await result.current.applyRemote(); });
+      expect(result.current.settings.bpm).toBe(86);
+      expect(result.current.remoteUpdate).toBe(false);
+    } finally { connection.close(); }
+  });
+  it("publishes the validated backup with one generation switch", async () => {
+    const result=await mount();const incoming=sample();
+    await act(async()=>{expect(await result.current.importData(incoming,"replace")).toBe(true);});
+    expect(result.current.data).toEqual(incoming);const db=await openPulseDb();try{expect((await readSnapshot(db)).data).toEqual(incoming);}finally{db.close();}
   });
 });

@@ -125,12 +125,30 @@ export function validateEnvelope(value: unknown, legacy = false): ValidationIssu
   const ids = presets(o.presets, issues, legacy);
   lists(o.setlists, "setlists", issues, legacy, ids);
   if (!legacy) {
-    const n = object(o.navigation, "navigation", issues);
-    if (n.activePresetId !== null && !ids.has(n.activePresetId)) issue(issues, "navigation.activePresetId", "존재하는 프리셋 ID 또는 null이 필요합니다");
-    const activeList = Array.isArray(o.setlists) ? o.setlists.find((s) => isObj(s) && s.id === n.activeSetlistId) : undefined;
-    if (n.activeSetlistId !== null && !activeList) issue(issues, "navigation.activeSetlistId", "존재하는 셋리스트 ID 또는 null이 필요합니다");
-    number(n.activeItemIndex, "navigation.activeItemIndex", issues, 0, 999);
-    if (isObj(activeList) && Array.isArray(activeList.items) && typeof n.activeItemIndex === "number" && n.activeItemIndex >= Math.max(1, activeList.items.length)) issue(issues, "navigation.activeItemIndex", "선택 위치가 목록 범위를 벗어납니다");
+    const lengths = new Map<unknown, number>();
+    if (Array.isArray(o.setlists)) {
+      for (const row of o.setlists) if (isObj(row) && Array.isArray(row.items)) lengths.set(row.id, row.items.length);
+    }
+    issues.push(...validateNavigation(o.navigation, ids, lengths));
+  }
+  return issues;
+}
+export function validateNavigation(value: unknown, ids: Set<unknown>, listLengths: Map<unknown, number>): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const n = object(value, "navigation", issues);
+  if (n.activePresetId !== null && !ids.has(n.activePresetId)) issue(issues, "navigation.activePresetId", "존재하는 프리셋 ID 또는 null이 필요합니다");
+  if (n.activeSetlistId !== null && !listLengths.has(n.activeSetlistId)) issue(issues, "navigation.activeSetlistId", "존재하는 셋리스트 ID 또는 null이 필요합니다");
+  number(n.activeItemIndex, "navigation.activeItemIndex", issues, 0, 999);
+  const length = listLengths.get(n.activeSetlistId);
+  if (length !== undefined && typeof n.activeItemIndex === "number" && n.activeItemIndex >= Math.max(1, length)) issue(issues, "navigation.activeItemIndex", "선택 위치가 목록 범위를 벗어납니다");
+  return issues;
+}
+export function validateBackupRow(kind: "presets" | "setlists", row: unknown, index: number, legacy: boolean, presetIds?: Set<unknown>): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (kind === "presets") preset(row, `presets[${index}]`, issues, legacy);
+  else {
+    lists([row], "setlists", issues, legacy, presetIds);
+    for (const entry of issues) entry.path = entry.path.replace(/^setlists\[0\]/, `setlists[${index}]`);
   }
   return issues;
 }

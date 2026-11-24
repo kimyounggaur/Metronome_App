@@ -8,13 +8,15 @@ interface BpmDisplayProps {
   timeSignature: TimeSignature;
   tempoUnit?: TempoUnit;
   onSetBpm: (bpm: number) => void;
+  onBeginDrag?: () => void;
+  onCancelDrag?: () => void;
 }
 
 export const tempoUnitLabels: Record<TempoUnit, string> = {
   quarter: "4분음표", eighth: "8분음표", "dotted-quarter": "점4분음표",
 };
 
-export const BpmDisplay = memo(function BpmDisplay({ bpm, timeSignature, tempoUnit = "quarter", onSetBpm }: BpmDisplayProps) {
+export const BpmDisplay = memo(function BpmDisplay({ bpm, timeSignature, tempoUnit = "quarter", onSetBpm, onBeginDrag, onCancelDrag }: BpmDisplayProps) {
   const [draft, setDraft] = useState(String(bpm));
   const [isEditing, setIsEditing] = useState(false);
   const editingRef = useRef(false);
@@ -27,10 +29,10 @@ export const BpmDisplay = memo(function BpmDisplay({ bpm, timeSignature, tempoUn
     editingRef.current = false;
     setIsEditing(false);
     const trimmed = draft.trim();
-    const valid = /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(trimmed) && Number.isFinite(Number(trimmed));
-    const next = cancel ? editStartRef.current : valid ? clampBpm(Number(trimmed)) : bpm;
+    const valid = /^[-+]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(trimmed) && Number.isFinite(Number(trimmed));
+    const next = valid ? clampBpm(Number(trimmed)) : bpm;
     setDraft(String(next));
-    if ((valid && !cancel) || (cancel && next !== bpm)) onSetBpm(next);
+    if (!cancel && valid && next !== editStartRef.current && next !== bpm) onSetBpm(next);
   }
 
   function finishDrag(event: PointerEvent<HTMLInputElement>, cancel: boolean) {
@@ -38,7 +40,8 @@ export const BpmDisplay = memo(function BpmDisplay({ bpm, timeSignature, tempoUn
     if (!drag || drag.pointerId !== event.pointerId) return;
     dragRef.current = null;
     if (drag.active && cancel) {
-      onSetBpm(drag.bpm);
+      if (onCancelDrag) onCancelDrag();
+      else onSetBpm(drag.bpm);
       setDraft(String(drag.bpm));
     }
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
@@ -61,7 +64,7 @@ export const BpmDisplay = memo(function BpmDisplay({ bpm, timeSignature, tempoUn
         autoComplete="off"
         value={isEditing ? draft : String(bpm)}
         aria-label="BPM 직접 입력"
-        aria-describedby={isEditing ? "bpm-edit-help" : undefined}
+        aria-describedby={isEditing ? "bpm-unit bpm-edit-help" : "bpm-unit"}
         onChange={(event) => setDraft(event.target.value)}
         onFocus={() => {
           if (dragRef.current?.active) return;
@@ -89,6 +92,7 @@ export const BpmDisplay = memo(function BpmDisplay({ bpm, timeSignature, tempoUn
           if (!drag.active && Math.abs(movement) < 8) return;
           if (!drag.active) {
             drag.active = true;
+            onBeginDrag?.();
             editingRef.current = false;
             setIsEditing(false);
             event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -103,7 +107,7 @@ export const BpmDisplay = memo(function BpmDisplay({ bpm, timeSignature, tempoUn
         onPointerCancel={(event) => finishDrag(event, true)}
         onLostPointerCapture={(event) => finishDrag(event, true)}
       />
-      <div className="text-sm font-semibold text-[color:var(--muted)]">{tempoUnitLabels[tempoUnit]} = BPM</div>
+      <div id="bpm-unit" className="text-sm font-semibold text-[color:var(--muted)]">{tempoUnitLabels[tempoUnit]} = BPM</div>
       {isEditing ? (
         <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-[color:var(--muted)]">
           <span id="bpm-edit-help">30–300 · 확정 시 수동값 적용</span>

@@ -111,6 +111,28 @@ describe("engine lifecycle", () => {
     const retry = engine.start(); h.workers.at(-1)!.send("ready"); await retry;
     expect(engine.isActive).toBe(true); engine.dispose(); vi.useRealTimers();
   });
+  it("ends a stuck resume after two seconds and also settles a canceled start", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = engineHarness();
+      h.context.state = "suspended";
+      h.context.resume.mockImplementation(() => new Promise<void>(() => {}));
+      const engine = new MetronomeEngine(settings(), undefined, h.dependencies);
+      const timeout = expect(engine.start()).rejects.toThrow("준비 시간");
+      await vi.advanceTimersByTimeAsync(2000);
+      await timeout;
+      expect(engine.getSnapshot().state).toBe("error");
+      const pending = engine.start();
+      await Promise.resolve();
+      engine.stop();
+      await pending;
+      expect(h.context.oscillators).toHaveLength(0);
+      h.context.state = "running";
+      await engine.start();
+      expect(engine.isActive).toBe(true);
+      engine.dispose();
+    } finally { vi.useRealTimers(); }
+  });
   it("applies user volume once and keeps envelope relative", async () => {
     for (const volume of [0, 0.5, 1]) {
       const h = engineHarness(); const engine = new MetronomeEngine({ ...settings(), volume }, undefined, h.dependencies);

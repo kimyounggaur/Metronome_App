@@ -1,53 +1,28 @@
-# PWA 및 화면 켜짐 유지
+# Pulse 오프라인 실행과 업데이트
 
-## 빌드와 파일 경계
+## 빌드와 파일 무결성
 
-`npm run build`의 마지막 단계는 `node scripts/build-sw.mjs`여야 한다. Vite가 생성한 index HTML, JS, CSS, scheduler Worker와 manifest·아이콘을 수집하고 파일 내용 및 SW 소스의 SHA-256에서 build version을 만든다. 생성 목록은 `dist/pwa-precache.json`이며 배포할 SW는 생성된 `dist/sw.js`다. `public/sw.js` 원본은 배포용 캐시 목록이 없는 템플릿이다.
+`npm run build`는 Vite가 만든 `dist` 전체를 대상으로 `scripts/build-sw.mjs`를 실행한다. HTML 원본의 버전 마커를 정규화하고 SW 템플릿·허용 MIME·자산 내용으로 빌드 ID를 정한 뒤, 최종 HTML에 `pulse-build`를 넣는다. 이후 모든 최종 파일의 SHA-256을 계산한다. 운영용 `dist/sw.js`에는 이 명세가 내장되고 `dist/pwa-precache.json`에는 같은 내용이 기록된다. 패키지는 빌드 결과 전체를 원자적으로 배포한다.
 
-PNG 아이콘은 기존 `public/icon.svg`의 원·선 기하를 유지한다. `node scripts/generate-icons.mjs`로 192·512 PNG, 512 maskable, 180 Apple 아이콘을 다시 만들 수 있다. 로고는 maskable 안전 영역 안에 있고 네 아이콘 모두 불투명 배경을 사용한다.
+설치·캐시 조회·복구는 각 빌드의 정확한 URL, 200 응답, 허용 MIME과 바이트 digest를 검사한다. HTML 대체 응답·다른 버전·깨진 캐시는 오프라인 준비 완료로 판정하지 않는다. 실패한 설치 후보는 현재 정상 캐시를 유지한다. 현재 화면의 누락 자산은 인터넷 연결 시 같은 버전 파일로 복구한다. 서버가 다른 버전만 제공하면 ‘다시 확인’ 또는 연습을 마치고 새 버전을 여는 경로를 사용한다.
 
-## 준비·업데이트 규칙
+## 열린 탭과 업데이트
 
-- install에서 선언된 모든 자산의 precache 성공이 필요하다. 첫 재생 전 Worker도 저장한다.
-- activate 완료 후 활성 controller에 실제 캐시 완전성을 묻고, 성공했을 때만 ‘오프라인 사용 준비 완료’를 보여 준다.
-- 현재 SW가 담당하는 build의 HTML과 자산을 함께 사용한다. 새 build는 별도 캐시에 준비된 뒤 waiting 상태로 남는다.
-- 사용자가 ‘업데이트 적용’ 또는 ‘정지 후 업데이트 적용’을 누르면 저장 flush 이후 waiting SW에 적용 메시지를 보낸다. 그 페이지는 controllerchange 뒤 새로 열린다. 자동 reload·자동 skipWaiting은 없다.
-- cache 이름은 `pulse-metronome-v2:<scope pathname>:<build hash>`다. 활성화 시 같은 scope의 이 prefix에 속한 이전 build만 정리한다. 다른 앱 캐시·SW와 다른 scope의 Pulse 캐시는 유지한다.
-- DEV 정리는 scope와 scriptURL이 모두 일치하는 이 앱의 SW만 unregister한다. 캐시 정리도 같은 scope의 전용 prefix로 제한한다.
-- navigation만 HTML shell fallback을 사용한다. 없는 JS·CSS·Worker·JSON·API에 HTML을 반환하지 않는다. 임의 요청을 추가 캐싱하지 않는다.
-- 브라우저가 일부 캐시를 지운 경우 상태 확인 시 누락된 선언 자산만 온라인 복구를 시도한다. 실패했다면 준비 실패로 표시한다.
+브라우저의 SW 활성 버전과 화면이 실행 중인 빌드 ID를 따로 관리한다. 앱 등록 scope에 속한 탭과 해당 빌드의 명세를 캐시 메타데이터에 저장하고, SW가 종료됐다가 재시작해도 같은 파일을 공급한다. 열린 창을 확인하기 전에는 이전 버전 캐시를 지우지 않는다. 현재·이전·후보의 세대가 함께 있을 때 이전 세대의 탭이 끝날 때까지 추가 전환을 보류한다. 업데이트 적용 전에 현재 탭의 저장 완료를 기다린다. 다른 탭은 연습을 계속하고 ‘연습을 마치고 새 버전 열기’를 선택할 수 있다.
 
-## 설치와 기기 복귀
+기존 v2 운영본의 탭은 빌드 식별에 응답할 수 없다. 처음 업그레이드하는 경우 **열린 메트로놈 탭을 모두 닫고 다시 연다.** 브라우저의 자연 활성화를 통해 새 SW로 전환한다. 이전 화면의 ‘적용 중…’이 남아 있어도 재설치하거나 브라우저 데이터를 삭제할 필요가 없다.
 
-설치는 `beforeinstallprompt`가 제공될 때 사용자가 직접 시작한다. iOS에서는 요청 시 Safari 공유 → 홈 화면에 추가 절차를 보여 준다. standalone으로 실행 중이면 설치 안내를 숨긴다. 닫기 동작은 App의 `showInstallHint` 설정으로 저장해야 한다.
+후보 설치에 실패하면 직전 정상 버전에서 계속 연습한다. 이미 활성화한 릴리스에서 회귀가 확인되면 마지막 정상 앱 기능에 현재 저장 어댑터와 SW 프로토콜을 결합한 **새 빌드 ID의 호환 복구판**을 배포한다. 새 저장 형식 읽기·v2 내보내기, 두 탭 업데이트 및 첫 오프라인 재생을 미리보기에서 먼저 검증한다. 오프라인인 기기는 다시 연결한 뒤 복구판을 받는다.
 
-Wake Lock은 재생 중이며 문서가 visible일 때만 요청한다. 숨김·정지·unmount 시 해제하고, 복귀하면 재요청한다. 진행 중인 요청은 하나이며 뒤늦게 완료된 이전 요청은 즉시 해제한다. 보이는 동안 예기치 않게 해제되면 750ms 뒤 한 번 재요청하고, 운영체제의 반복 해제에 무한 재요청하지 않는다. 권한·전원 정책 실패는 오디오 실행을 막지 않는다.
+## 재현 검사
 
-## 검증 실행
+Node 24에서 `npm run build` 후 `npm run test:pwa`를 실행한다. Chromium은 `npx playwright install chromium`으로 준비할 수 있다. 검사 서버는 사용 가능한 로컬 포트와 독립 브라우저 프로필을 사용한다. A는 현재 운영 산출물이며 B와 C는 임시 소스의 예약 Worker를 변경하고 Vite를 다시 실행해서 생성한다. 수정 전 앱은 기준 커밋 `2f97e9a302274fca30d461e9eedeb287ecafc4be`의 파일로 빌드한다. 커밋을 포함하지 않는 소스 배포 환경에서는 해당 커밋에서 만든 dist 위치를 `PULSE_LEGACY_DIST`로 제공한다.
 
-`node scripts/verify-pwa.mjs`는 현재 production `dist`를 사용한다. 먼저 정상 build가 필요하다. 테스트는 독립 origin `http://127.0.0.1:4173`의 임시 서버와 새 Chromium context를 사용하고 기존 사용자의 브라우저 데이터는 접근하지 않는다.
+검사는 선언 자산 해시, 잘못된 Worker MIME·내용, 동명 index의 버전 혼합, 캐시 손상 후 복구, 최초 설치 실패/재시도, 두 탭의 오프라인 재생과 수동 갱신, SW 프로세스 재시작, 세 번째 버전의 보류와 정리, 구형 탭을 모두 닫은 뒤의 전환을 확인한다. 최신 실행 기록은 `output/playwright/pwa-<timestamp>/report.json`에 생성된다. 브라우저가 성공한 박 표시와 소리 예약을 검증한다. 실제 음향 출력은 별도 기기 측정 항목이다.
 
-검증기는 `output/playwright/pwa-<timestamp>` 아래에 production A/B 사본을 만들고 B에 검증 메타데이터만 추가하여 새 precache build를 생성한다. 테스트 후 서버와 브라우저는 닫고 보고서·스크린샷·빌드 사본은 증거로 남긴다.
+실제 iPhone·Android에서는 설치 후 비행기 모드에서 앱을 완전히 닫고 다시 열어 첫 재생을 확인한다. 화면 잠금·복귀, 오디오 중단, Wake Lock 재획득, 유선·Bluetooth 출력과 업데이트 뒤 프리셋 유지 결과를 기기·OS 버전과 함께 기록한다.
 
-검사 항목:
-
-1. HTTP 캐시를 CDP로 비활성화하고 첫 재생 전에 전체 선언 자산·Worker 캐시 확인.
-2. 서버가 모든 연결을 실제 끊도록 변경하고 Chromium도 offline으로 전환. Node 네트워크 요청 실패를 별도로 확인한 뒤 새로고침과 첫 재생·정지.
-3. offline의 없는 JS는 503 text, online의 SPA HTML fallback은 404 text로 변환.
-4. 재생 중 새 버전 준비와 waiting 유지, 사용자 적용 후 새 버전·BPM·localStorage 보존.
-5. 다른 앱 캐시, 다른 scope의 Pulse 캐시, 다른 SW 등록 보존 및 이전 자기 build 정리.
-
-화면 켜짐 유지의 API 경계는 `src/tests/wakeLock.test.tsx`로 검증한다. 실제 iPhone Safari 및 Android Chrome의 설치 화면·홈 화면 실행·OS 오디오 중단·Wake Lock 동작은 실기 검증 항목이다. 자동 테스트의 서버 차단은 물리적인 인터넷 회선 차단·장치 출력의 측정이 아니다.
-
-실기 절차: 온라인 첫 방문 후 준비 완료 확인 → 아직 재생하지 않은 상태에서 비행기 모드 → 앱 종료·홈 화면에서 재실행 → 첫 재생·정지 → 화면 잠금/앱 전환 후 복귀 → 중단 안내 또는 정상 transport 상태 → 온라인 복귀와 새 버전 사용자 적용 → 기존 프리셋 유지 확인. 사용 기기·OS·브라우저 버전과 유선/Bluetooth 출력 조건을 기록한다.
-
-## 근거
-
-[Service worker lifecycle](https://web.dev/articles/service-worker-lifecycle), [PWA updates](https://web.dev/learn/pwa/update), [Screen Wake Lock API](https://developer.mozilla.org/en-US/docs/Web/API/Screen_Wake_Lock_API).
-
-실제 실행 결과는 timestamp별 `report.json`에 기록한다. 실행하지 않은 항목을 통과로 취급하지 않는다.
-
-## 실제 자동 검증 결과 — 2026-09-05
+## 이전 v2 구현의 검증 기록 — 2026-09-05
 
 독립 production 검증을 Chromium 153.0.8010.12, 390×844, `http://127.0.0.1:4173`에서 실행해 통과했다. HTTP 캐시를 비활성화했고 필수 자산 11개에 scheduler Worker가 포함됨을 확인했다. 서버 socket 차단 및 브라우저 offline 상태에서 새로고침·첫 재생·정지가 통과했다. 존재하지 않는 JS는 offline 503 text / online 404 text였으며 HTML을 반환하지 않았다.
 

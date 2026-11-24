@@ -21,7 +21,7 @@ export const PracticeSheet = memo(function PracticeSheet({settings,setSettings,i
     <section className="space-y-3">
       <h3 className="font-bold">본 연습 타이머</h3>
       <div className="grid grid-cols-4 gap-2">{[null,60,180,300,600,900,1800,3600].map(seconds=><button key={seconds??"off"} type="button" className={chip(p.timerSeconds===seconds)} aria-label={seconds?seconds/60+"분 타이머":"타이머 끄기"} aria-pressed={p.timerSeconds===seconds} onClick={()=>patch({timerSeconds:seconds})}>{seconds?seconds/60+"분":"끔"}</button>)}</div>
-      <NumberField label="연습 시간 (초)" value={p.timerSeconds??60} min={DATA_LIMITS.timerSeconds[0]} max={DATA_LIMITS.timerSeconds[1]} onChange={timerSeconds=>patch({timerSeconds})}/>
+      <NumberField label="연습 시간 (초)" value={p.timerSeconds} placeholder="60" min={DATA_LIMITS.timerSeconds[0]} max={DATA_LIMITS.timerSeconds[1]} onChange={timerSeconds=>patch({timerSeconds})}/>
       <p className="text-sm text-[color:var(--muted)]">카운트인을 마친 뒤부터 시간을 셉니다.</p>
     </section>
     <section className="space-y-3">

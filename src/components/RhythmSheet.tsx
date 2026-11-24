@@ -1,6 +1,7 @@
 import { Music2 } from "lucide-react";
-import { memo, useState } from "react";
-import { ACCENT_LABELS, SUBDIVISION_LABELS, TIME_SIGNATURES, cycleAccent, normalizeAccents, secondsPerBar } from "../domain/rhythm";
+import { memo, useId, useState } from "react";
+import { MeterSummary } from "./MeterSummary";
+import { ACCENT_LABELS, accentGroupStarts, SUBDIVISION_LABELS, TIME_SIGNATURES, cycleAccent, normalizeAccents, secondsPerBar } from "../domain/rhythm";
 import type { AccentLevel, AppSettings, Subdivision, TimeSignature, TempoUnit } from "../domain/types";
 import { defaultBeatGroups } from "../domain/migration";
 
@@ -14,6 +15,7 @@ function sameSignature(a: TimeSignature, b: TimeSignature): boolean {
 }
 
 export const RhythmSheet = memo(function RhythmSheet({ settings, setSettings }: RhythmSheetProps) {
+  const accentHelpId = useId();
   const subdivisions: Subdivision[] = ["none", "eighth", "triplet", "sixteenth"];
   const [groupDraft,setGroupDraft] = useState<string|null>(null);
   const [groupError,setGroupError] = useState<string|null>(null);
@@ -71,6 +73,7 @@ export const RhythmSheet = memo(function RhythmSheet({ settings, setSettings }: 
         <select className="touch-target w-full rounded-2xl px-3 surface-2" aria-label="BPM 기준 음표" value={settings.tempoUnit} onChange={event=>setSettings(current=>({...current,tempoUnit:event.target.value as TempoUnit}))}>
           <option value="quarter">♩ 4분음표</option><option value="eighth">♪ 8분음표</option><option value="dotted-quarter">♩. 점4분음표</option>
         </select>
+        <MeterSummary bpm={settings.bpm} timeSignature={settings.timeSignature} tempoUnit={settings.tempoUnit} beatGroups={settings.beatGroups} />
         <p className="text-sm text-[color:var(--muted)]">한 마디 {Number(secondsPerBar(settings.bpm,settings.timeSignature,settings.tempoUnit).toFixed(3))}초 · {settings.timeSignature.noteValue}분음표 셀 {settings.timeSignature.beats}개</p>
       </section>
 
@@ -109,10 +112,11 @@ export const RhythmSheet = memo(function RhythmSheet({ settings, setSettings }: 
         </div>
         {groupError?<p role="alert" className="text-sm text-[color:var(--danger)]">{groupError}</p>:null}
         <p className="text-sm text-[color:var(--muted)]">{settings.beatGroups.join(' + ')} · {settings.beatGroups.length}개 그룹. 그룹 변경은 악센트를 유지합니다.</p>
-        <button className="touch-target rounded-xl px-3 surface-2" onClick={()=>setSettings(current=>{
-          let index=0;const accents:AccentLevel[]=Array.from({length:current.timeSignature.beats},()=>"normal");
-          current.beatGroups.forEach(size=>{accents[index]="strong";index+=size;});return {...current,accents};
-        })}>그룹 첫박에 강세 적용</button>
+        <button type="button" className="touch-target rounded-xl px-3 surface-2" aria-describedby={accentHelpId}
+          onClick={() => setSettings(current => ({ ...current, accents: accentGroupStarts(current.accents, current.beatGroups) }))}>
+          그룹 첫박에 강세 적용
+        </button>
+        <p id={accentHelpId} className="text-sm text-[color:var(--muted)]">기존 쉼 유지 · 각 그룹의 첫 칸에만 강세를 줍니다.</p>
       </section>
 
       <section className="space-y-3">

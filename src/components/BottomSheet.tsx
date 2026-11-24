@@ -24,7 +24,7 @@ export function BottomSheet({ title, isOpen, onClose, children, onStop }: Bottom
       document.body.style.overflow = previousOverflow;
       startYRef.current = null;
       if (trigger?.isConnected) trigger.focus();
-      else document.querySelector<HTMLButtonElement>('button[aria-label="메뉴"],button[aria-label="재생"]')?.focus();
+      else document.querySelector<HTMLButtonElement>('button[aria-label="키보드 단축키"],button[aria-label="재생"]')?.focus();
     };
   }, [isOpen]);
   return <dialog ref={dialogRef} aria-labelledby={titleId} aria-modal="true"
